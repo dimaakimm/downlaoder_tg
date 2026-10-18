@@ -335,6 +335,7 @@ func (b *Bot) showConfig(c tele.Context) error {
 
 	configInfo := fmt.Sprintf("🤖 Admin ID: %s\n"+
 		"📢 Channel Username: %s\n"+
+		"💳 Payment Enabled: %t\n"+
 		"🌐 Use Official API: %t\n"+
 		"🔗 API URL: %s\n"+
 		"👥 Max Workers: %d\n"+
@@ -342,6 +343,7 @@ func (b *Bot) showConfig(c tele.Context) error {
 		"📥 Download Timeout: %v",
 		b.config.AdminID,
 		b.config.ChannelUsername,
+		b.config.PaymentEnabled,
 		b.config.UseOfficialAPI,
 		b.config.TelegramAPIURL,
 		b.config.MaxWorkers,

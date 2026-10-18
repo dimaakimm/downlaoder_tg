@@ -36,6 +36,9 @@ func (b *Bot) setupMiddlewareLegacy() {
 			// Автоматически подтверждаем PreCheckoutQuery
 			if update.PreCheckoutQuery != nil {
 				logger.Info("PreCheckoutQuery: user_id=%d", update.PreCheckoutQuery.Sender.ID)
+				if !b.config.PaymentEnabled {
+					return c.Accept("Скачивание теперь бесплатное. Отправьте ссылку на видео ещё раз.")
+				}
 				if err := c.Accept(); err != nil {
 					logger.Error("Ошибка подтверждения PreCheckoutQuery: %v", err)
 				} else {

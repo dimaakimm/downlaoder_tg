@@ -17,6 +17,7 @@ type BotConfig struct {
 	AdminID         string
 	ProviderToken   string
 	ChannelUsername string
+	PaymentEnabled  bool
 	MaxWorkers      int
 	UseOfficialAPI  bool
 	TelegramAPIURL  string

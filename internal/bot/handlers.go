@@ -174,6 +174,12 @@ func (b *Bot) handleURLMessage(c tele.Context, msg *tele.Message, isAdmin bool) 
 		return nil
 	}
 
+	if !b.config.PaymentEnabled {
+		logger.Info("Бесплатный режим — скачивание для пользователя %d", msg.Sender.ID)
+		go b.sendVideo(c, url, "", 0, replyToMsg)
+		return nil
+	}
+
 	// ВСЕГДА проверяем подписку для не-админов
 	logger.Info("Проверяем подписку для пользователя %d", msg.Sender.ID)
 
@@ -284,6 +290,12 @@ func (b *Bot) handleCallback(c tele.Context) error {
 	logger.Info("user_id=%d, data=%q", cb.Sender.ID, cb.Data)
 
 	data := cb.Data
+
+	// Старые кнопки оплаты не должны создавать счета в бесплатном режиме.
+	if !b.config.PaymentEnabled && (strings.HasPrefix(data, CallbackPayVideo+"|") ||
+		data == CallbackPaySubscribe || data == CallbackPaySubscribeYear || data == CallbackPaySubscribeForever) {
+		return c.Send(b.i18nManager.T(c.Sender(), "downloads_are_free"))
+	}
 
 	// Обработка подписки на канал
 	if data == "subscribe_channel" {

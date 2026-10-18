@@ -12,6 +12,7 @@ func NewBotConfig(token, adminID, providerToken string) *BotConfig {
 		AdminID:         adminID,
 		ProviderToken:   providerToken,
 		ChannelUsername: os.Getenv("CHANNEL_USERNAME"),
+		PaymentEnabled:  os.Getenv("PAYMENT_ENABLED") == "true",
 		MaxWorkers:      DefaultMaxWorkers,
 		UseOfficialAPI:  os.Getenv("USE_OFFICIAL_API") == "true",
 		HTTPTimeout:     DefaultHTTPTimeout,

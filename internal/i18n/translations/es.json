@@ -1,5 +1,6 @@
 {
-  "welcome": "👋 ¡Bienvenido!\n\nEste bot te permite descargar videos de varios sitios por Telegram Stars. ¡Solo envía un enlace de video!",
+  "welcome": "👋 ¡Bienvenido!\n\nEste bot te permite descargar videos de varios sitios. ¡Solo envía un enlace de video!",
+  "downloads_are_free": "Las descargas ahora son gratis. Envía el enlace del video de nuevo.",
   "no_url_found": "No se encontró enlace. Por favor, envía un enlace de video.",
   "invalid_days": "El número de días debe ser un número",
   "invalid_user_id": "user_id debe ser un número",
@@ -26,6 +27,8 @@
   "not_subscribed": "❌ No estás suscrito al canal. Por favor, suscríbete e inténtalo de nuevo.",
   "subscribed_success": "✅ ¡Estás suscrito al canal! Ahora puedes descargar videos gratis.",
   "download_started": "🎬 Iniciando descarga del video...",
+  "download_progress": "⬇️ Descargando video: %d%%",
+  "download_sending": "📤 Video descargado, enviando a Telegram...",
   "download_completed": "✅ ¡Video descargado exitosamente!",
   "download_error": "❌ Error al descargar video: %s",
   "video_sent_successfully": "✅ ¡Video enviado exitosamente!",

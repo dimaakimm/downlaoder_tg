@@ -207,6 +207,31 @@ func (b *Bot) sendVideoWithRetry(c tele.Context, video *tele.Video, url string, 
 func (b *Bot) sendVideo(c tele.Context, url string, chargeID string, amount int, replyToMsg *tele.Message) {
 	logger := NewLogger("VIDEO")
 	startTime := time.Now()
+	var status *tele.Message
+	statusText := b.i18nManager.T(c.Sender(), "download_started")
+	var statusErr error
+	if replyToMsg != nil {
+		status, statusErr = b.api.Send(c.Chat(), statusText, &tele.SendOptions{ReplyTo: replyToMsg})
+	} else {
+		status, statusErr = b.api.Send(c.Chat(), statusText)
+	}
+	if statusErr != nil {
+		logger.Warning("Не удалось отправить статус загрузки: %v", statusErr)
+	}
+	setStatus := func(key string, args ...interface{}) {
+		message := b.i18nManager.T(c.Sender(), key, args...)
+		if status == nil {
+			var err error
+			status, err = b.api.Send(c.Chat(), message)
+			if err != nil {
+				logger.Warning("Не удалось отправить статус загрузки: %v", err)
+			}
+			return
+		}
+		if _, err := b.api.Edit(status, message); err != nil {
+			logger.Warning("Не удалось обновить статус загрузки: %v", err)
+		}
+	}
 
 	// Проверяем обновления yt-dlp перед началом скачивания
 	if err := downloader.CheckAndUpdateYTDLp(b.db); err != nil {
@@ -218,16 +243,16 @@ func (b *Bot) sendVideo(c tele.Context, url string, chargeID string, amount int,
 	// Проверяем, не скачивается ли уже это видео
 	if b.downloadManager.IsDownloadActive(url) {
 		logger.Info("Видео уже скачивается, ожидаем завершения")
-		c.Send(b.i18nManager.T(c.Sender(), "download_in_progress"))
+		setStatus("download_in_progress")
 		downloadInfo, err := b.downloadManager.WaitForDownload(url, b.config.DownloadTimeout)
 		if err != nil {
 			logger.Error("Ошибка ожидания скачивания: %v", err)
-			c.Send(b.i18nManager.T(c.Sender(), "download_wait_error"))
+			setStatus("download_wait_error")
 			return
 		}
 		if downloadInfo != nil && downloadInfo.Error != nil {
 			logger.Error("Скачивание завершилось с ошибкой: %v", downloadInfo.Error)
-			c.Send(b.i18nManager.T(c.Sender(), "download_error", downloadInfo.Error.Error()))
+			setStatus("download_error", downloadInfo.Error.Error())
 			return
 		}
 	}
@@ -235,7 +260,7 @@ func (b *Bot) sendVideo(c tele.Context, url string, chargeID string, amount int,
 	// Получаем слот для скачивания
 	if !b.downloadManager.AcquireDownloadSlot() {
 		logger.Warning("Нет свободных слотов для скачивания")
-		c.Send(b.i18nManager.T(c.Sender(), "too_many_requests"))
+		setStatus("too_many_requests")
 		return
 	}
 	defer b.downloadManager.ReleaseDownloadSlot()
@@ -275,6 +300,7 @@ func (b *Bot) sendVideo(c tele.Context, url string, chargeID string, amount int,
 
 			// Отправляем кэшированное видео напрямую
 			logger.Info("Отправляем кэшированное видео с file_id: %s для URL: %s", cached.FilePath, url)
+			setStatus("download_sending")
 			var sentMessage *tele.Message
 			var err error
 			if replyToMsg != nil {
@@ -290,6 +316,7 @@ func (b *Bot) sendVideo(c tele.Context, url string, chargeID string, amount int,
 				// Продолжаем со скачиванием
 			} else {
 				logger.Info("Кэшированное видео успешно отправлено для URL: %s!", url)
+				setStatus("video_sent_successfully")
 				logger.LogPerformance("Отправка кэшированного видео", startTime)
 
 				// Дополнительная проверка - если получили file_id, сравниваем с кэшированным
@@ -318,18 +345,25 @@ func (b *Bot) sendVideo(c tele.Context, url string, chargeID string, amount int,
 		}
 	}
 
-	// Уведомляем пользователя о начале скачивания (только если видео не в кэше)
-	c.Send(b.i18nManager.T(c.Sender(), "download_started"))
-
 	// Скачиваем видео
+	if cachedVideo != nil {
+		setStatus("download_started")
+	}
 	logger.Info("Скачиваем видео: %s", url)
 
 	// Создаем уникальный путь для каждого скачивания
-	uniqueVideoPath, err := DownloadVideo(url)
+	lastProgressUpdate := time.Time{}
+	uniqueVideoPath, err := DownloadVideoWithProgress(url, func(percent int) {
+		if time.Since(lastProgressUpdate) < 2*time.Second {
+			return
+		}
+		setStatus("download_progress", percent)
+		lastProgressUpdate = time.Now()
+	})
 	if err != nil {
 		logger.Error("Ошибка скачивания видео: %v", err)
 		b.downloadManager.FinishDownload(url, err)
-		c.Send(b.i18nManager.T(c.Sender(), "download_error", err.Error()))
+		setStatus("download_error", err.Error())
 		return
 	}
 
@@ -337,7 +371,7 @@ func (b *Bot) sendVideo(c tele.Context, url string, chargeID string, amount int,
 	if uniqueVideoPath == "" {
 		logger.Error("Получен пустой путь к видео")
 		b.downloadManager.FinishDownload(url, fmt.Errorf("пустой путь к видео"))
-		c.Send(b.i18nManager.T(c.Sender(), "download_error", "пустой путь к видео"))
+		setStatus("download_error", "пустой путь к видео")
 		return
 	}
 
@@ -345,7 +379,7 @@ func (b *Bot) sendVideo(c tele.Context, url string, chargeID string, amount int,
 	if _, err := os.Stat(uniqueVideoPath); os.IsNotExist(err) {
 		logger.Error("Файл не существует по пути: %s", uniqueVideoPath)
 		b.downloadManager.FinishDownload(url, fmt.Errorf("файл не существует"))
-		c.Send(b.i18nManager.T(c.Sender(), "download_error", "файл не существует"))
+		setStatus("download_error", "файл не существует")
 		return
 	}
 
@@ -356,7 +390,7 @@ func (b *Bot) sendVideo(c tele.Context, url string, chargeID string, amount int,
 	if err != nil {
 		logger.Error("Ошибка получения информации о видео: %v", err)
 		b.downloadManager.FinishDownload(url, err)
-		c.Send(b.i18nManager.T(c.Sender(), "download_error", err.Error()))
+		setStatus("download_error", err.Error())
 		return
 	}
 
@@ -378,6 +412,7 @@ func (b *Bot) sendVideo(c tele.Context, url string, chargeID string, amount int,
 		}
 
 		logger.Info("Пытаемся отправить видео размером %d байт для URL: %s", fileSize, url)
+		setStatus("download_sending")
 
 		// Отправляем видео напрямую через API для получения file_id
 		var sentMessage *tele.Message
@@ -389,11 +424,12 @@ func (b *Bot) sendVideo(c tele.Context, url string, chargeID string, amount int,
 		if err != nil {
 			logger.Error("Ошибка отправки видео: %v", err)
 			b.downloadManager.FinishDownload(url, err)
-			c.Send(b.i18nManager.T(c.Sender(), "send_error", err))
+			setStatus("send_error", err)
 			return
 		}
 
 		logger.Info("Видео успешно отправлено для URL: %s! sentMessage: %+v", url, sentMessage)
+		setStatus("video_sent_successfully")
 
 		// Сохраняем file_id в кэш, если видео было отправлено
 		if sentMessage != nil && sentMessage.Video != nil && sentMessage.Video.FileID != "" {

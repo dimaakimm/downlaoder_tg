@@ -1,15 +1,59 @@
 package downloader
 
 import (
-	"YoutubeDownloader/internal/utils"
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
+	"sync"
+
+	"YoutubeDownloader/internal/utils"
 )
+
+var downloadPercentPattern = regexp.MustCompile(`\[download\]\s+(\d+(?:\.\d+)?)%`)
+
+// progressOutput сохраняет диагностику yt-dlp и передает процент из его вывода.
+type progressOutput struct {
+	mu       sync.Mutex
+	output   bytes.Buffer
+	line     bytes.Buffer
+	lastStep int
+	onUpdate func(int)
+}
+
+func (p *progressOutput) Write(data []byte) (int, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	_, _ = p.output.Write(data)
+	for _, ch := range data {
+		if ch == '\n' || ch == '\r' {
+			if match := downloadPercentPattern.FindSubmatch(p.line.Bytes()); len(match) == 2 {
+				value, err := strconv.ParseFloat(string(match[1]), 64)
+				if err == nil {
+					percent := int(value)
+					if percent > 99 {
+						percent = 99 // Финальная обработка и отправка еще впереди.
+					}
+					step := percent / 5
+					if step > p.lastStep && p.onUpdate != nil {
+						p.lastStep = step
+						p.onUpdate(percent)
+					}
+				}
+			}
+			p.line.Reset()
+		} else {
+			_ = p.line.WriteByte(ch)
+		}
+	}
+	return len(data), nil
+}
 
 // DownloadYouTubeVideo скачивает видео с YouTube
 func DownloadYouTubeVideo(url string) (string, error) {
@@ -96,6 +140,11 @@ func DownloadYouTubeVideo(url string) (string, error) {
 
 // DownloadYouTubeVideoWithUserID скачивает видео с YouTube с уникальным идентификатором пользователя
 func DownloadYouTubeVideoWithUserID(url string, userID int64, requestID string) (string, error) {
+	return DownloadYouTubeVideoWithUserIDProgress(url, userID, requestID, nil)
+}
+
+// DownloadYouTubeVideoWithUserIDProgress сообщает процент загрузки из yt-dlp.
+func DownloadYouTubeVideoWithUserIDProgress(url string, userID int64, requestID string, onProgress func(int)) (string, error) {
 	tmpDir := "./tmp"
 	if err := os.MkdirAll(tmpDir, 0755); err != nil {
 		return "", errors.New("не удалось создать временную папку: " + err.Error())
@@ -128,15 +177,15 @@ func DownloadYouTubeVideoWithUserID(url string, userID int64, requestID string) 
 	}{
 		{
 			name: "best_quality",
-			args: []string{"-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best", "-o", absFilename, "--no-mtime", "--no-warnings"},
+			args: []string{"-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best", "-o", absFilename, "--no-mtime", "--no-warnings", "--newline"},
 		},
 		{
 			name: "simple_best",
-			args: []string{"-f", "best[ext=mp4]/best", "-o", absFilename, "--no-mtime", "--no-warnings"},
+			args: []string{"-f", "best[ext=mp4]/best", "-o", absFilename, "--no-mtime", "--no-warnings", "--newline"},
 		},
 		{
 			name: "worst_quality",
-			args: []string{"-f", "worst[ext=mp4]/worst", "-o", absFilename, "--no-mtime", "--no-warnings"},
+			args: []string{"-f", "worst[ext=mp4]/worst", "-o", absFilename, "--no-mtime", "--no-warnings", "--newline"},
 		},
 	}
 
@@ -147,7 +196,11 @@ func DownloadYouTubeVideoWithUserID(url string, userID int64, requestID string) 
 		cmd := exec.Command(absYtDlpPath, strategy.args...)
 		cmd.Args = append(cmd.Args, url)
 
-		output, err := cmd.CombinedOutput()
+		progress := &progressOutput{onUpdate: onProgress}
+		cmd.Stdout = progress
+		cmd.Stderr = progress
+		err := cmd.Run()
+		output := progress.output.Bytes()
 		if err != nil {
 			lastError = fmt.Errorf("yt-dlp error (strategy %s): %v, details: %s", strategy.name, err, string(output))
 			fmt.Printf("[DOWNLOADER] [%s] Пользователь %d: стратегия %s не удалась: %v\n", requestID, userID, strategy.name, err)

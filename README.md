@@ -52,6 +52,7 @@ Telegram-бот для скачивания видео с YouTube, Shorts и Tik
 - `DB_PASSWORD` — пароль пользователя БД (по умолчанию `ytpass`)
 - `DB_NAME` — имя базы данных (по умолчанию `ytbot`)
 - `CHANNEL_USERNAME` — username Telegram-канала для бесплатного доступа (опционально)
+- `PAYMENT_ENABLED` — `false` (по умолчанию): все пользователи скачивают бесплатно без проверки подписки на канал; `true`: прежний режим с оплатой через Stars и бесплатным доступом для подписчиков канала. Изменение требует перезапуска бота.
 - `MAX_DOWNLOAD_WORKERS` — максимальное количество одновременных загрузок видео (по умолчанию 3)
 - `TELEGRAM_API_URL` — адрес локального сервера Telegram Bot API (например, `http://telegram-bot-api:8081`, **обязателен**)
 - `TELEGRAM_API_ID` и `TELEGRAM_API_HASH` — для сервиса telegram-bot-api (получить на https://my.telegram.org)

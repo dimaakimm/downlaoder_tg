@@ -77,6 +77,6 @@ func (l *Logger) LogPerformance(operation string, startTime time.Time) {
 
 // LogConfig логирует конфигурацию
 func (l *Logger) LogConfig(config *BotConfig) {
-	l.Info("Bot configuration: max_workers=%d, use_official_api=%t, api_url=%s",
-		config.MaxWorkers, config.UseOfficialAPI, config.TelegramAPIURL)
+	l.Info("Bot configuration: max_workers=%d, payment_enabled=%t, use_official_api=%t, api_url=%s",
+		config.MaxWorkers, config.PaymentEnabled, config.UseOfficialAPI, config.TelegramAPIURL)
 }

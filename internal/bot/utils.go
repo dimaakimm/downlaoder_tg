@@ -132,11 +132,16 @@ func SaveVideoToCache(db interface{}, cacheKey, fileID string) error {
 
 // DownloadVideo скачивает видео
 func DownloadVideo(url string) (string, error) {
+	return DownloadVideoWithProgress(url, nil)
+}
+
+// DownloadVideoWithProgress передает прогресс текущей загрузки вызывающему коду.
+func DownloadVideoWithProgress(url string, onProgress func(int)) (string, error) {
 	// Создаем уникальный идентификатор для каждого скачивания
 	requestID := GenerateRequestID()
 
 	// Используем реальную функцию скачивания из пакета downloader с уникальным ID
-	return downloader.DownloadYouTubeVideoWithUserID(url, 0, requestID)
+	return downloader.DownloadYouTubeVideoWithUserIDProgress(url, 0, requestID, onProgress)
 }
 
 // GetVideoInfo получает информацию о видео
