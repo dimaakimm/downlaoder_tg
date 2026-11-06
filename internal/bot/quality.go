@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"YoutubeDownloader/internal/downloader"
+
 	tele "gopkg.in/telebot.v4"
 )
 
@@ -15,14 +17,15 @@ type qualityRequest struct {
 	userID    int64
 	chatID    int64
 	createdAt time.Time
+	options   map[int]string
 }
 
 func validQuality(quality int) bool {
-	return quality == 1080 || quality == 720 || quality == 480
+	return quality >= 0 && quality <= 16384
 }
 
 func videoCacheKey(url string, quality int) string {
-	return fmt.Sprintf("%s|quality=%d", url, quality)
+	return fmt.Sprintf("%s|quality=%d|resolution=short-side-v1", url, quality)
 }
 
 func videoPayload(url string, quality int) string {
@@ -41,8 +44,45 @@ func parseVideoPayload(payload string) (int, string) {
 }
 
 func (b *Bot) askVideoQuality(msg *tele.Message, url string) error {
+	options := &tele.SendOptions{}
+	if msg.Chat.Type == "group" || msg.Chat.Type == "supergroup" {
+		options.ReplyTo = msg
+	}
+	if !b.downloadManager.AcquireDownloadSlot() {
+		_, err := b.api.Send(msg.Chat, b.i18nManager.T(msg.Sender, "too_many_requests"), options)
+		return err
+	}
+	defer b.downloadManager.ReleaseDownloadSlot()
+	status, err := b.api.Send(msg.Chat, b.i18nManager.T(msg.Sender, "quality_checking"), options)
+	if err != nil {
+		return err
+	}
+	if err := downloader.CheckAndUpdateYTDLp(b.db); err != nil {
+		NewLogger("QUALITY").Warning("yt-dlp update: %v", err)
+	}
+	qualities, err := downloader.AvailableVideoQualities(url)
+	if err != nil {
+		NewLogger("QUALITY").Error("Cannot list formats for %s: %v", url, err)
+		_, sendErr := b.api.Edit(status, b.i18nManager.T(msg.Sender, "quality_probe_error"))
+		return sendErr
+	}
 	token := GenerateRequestID()
-	request := qualityRequest{url: url, message: msg, userID: msg.Sender.ID, chatID: msg.Chat.ID, createdAt: time.Now()}
+	request := qualityRequest{url: url, message: msg, userID: msg.Sender.ID, chatID: msg.Chat.ID, createdAt: time.Now(), options: make(map[int]string)}
+	markup := &tele.ReplyMarkup{}
+	for i, quality := range qualities {
+		label := fmt.Sprintf("%dp", quality.Resolution)
+		if quality.Resolution == 0 {
+			label = b.i18nManager.T(msg.Sender, "quality_original")
+		} else if quality.Convert {
+			label = b.i18nManager.T(msg.Sender, "quality_convert", quality.Resolution)
+		}
+		request.options[quality.Resolution] = label
+		if i%2 == 0 {
+			markup.InlineKeyboard = append(markup.InlineKeyboard, []tele.InlineButton{})
+		}
+		row := len(markup.InlineKeyboard) - 1
+		markup.InlineKeyboard[row] = append(markup.InlineKeyboard[row], tele.InlineButton{Text: label, Data: fmt.Sprintf("quality|%s|%d", token, quality.Resolution)})
+	}
 	b.qualityMutex.Lock()
 	if b.pendingQuality == nil {
 		b.pendingQuality = make(map[string]qualityRequest)
@@ -55,16 +95,7 @@ func (b *Bot) askVideoQuality(msg *tele.Message, url string) error {
 	b.pendingQuality[token] = request
 	b.qualityMutex.Unlock()
 
-	markup := &tele.ReplyMarkup{InlineKeyboard: [][]tele.InlineButton{{
-		{Text: "1080p", Data: "quality|" + token + "|1080"},
-		{Text: "720p", Data: "quality|" + token + "|720"},
-		{Text: "480p", Data: "quality|" + token + "|480"},
-	}}}
-	options := &tele.SendOptions{ReplyMarkup: markup}
-	if msg.Chat.Type == "group" || msg.Chat.Type == "supergroup" {
-		options.ReplyTo = msg
-	}
-	if _, err := b.api.Send(msg.Chat, "Выберите качество видео:", options); err != nil {
+	if _, err := b.api.Edit(status, b.i18nManager.T(msg.Sender, "quality_prompt"), markup); err != nil {
 		b.qualityMutex.Lock()
 		delete(b.pendingQuality, token)
 		b.qualityMutex.Unlock()
@@ -84,7 +115,8 @@ func (b *Bot) handleQualityCallback(c tele.Context, data string) error {
 	}
 	b.qualityMutex.Lock()
 	request, ok := b.pendingQuality[parts[1]]
-	if ok && request.userID == c.Sender().ID && request.chatID == c.Chat().ID && time.Since(request.createdAt) <= 30*time.Minute {
+	label, offered := request.options[quality]
+	if ok && offered && request.userID == c.Sender().ID && request.chatID == c.Chat().ID && time.Since(request.createdAt) <= 30*time.Minute {
 		delete(b.pendingQuality, parts[1])
 	} else {
 		ok = false
@@ -94,7 +126,7 @@ func (b *Bot) handleQualityCallback(c tele.Context, data string) error {
 		return c.Respond(&tele.CallbackResponse{Text: "Выбор недоступен. Отправьте ссылку ещё раз."})
 	}
 	_ = c.Respond()
-	if _, err := b.api.Edit(c.Callback().Message, fmt.Sprintf("Выбрано качество: %dp", quality), &tele.ReplyMarkup{}); err != nil {
+	if _, err := b.api.Edit(c.Callback().Message, b.i18nManager.T(c.Sender(), "quality_selected", label), &tele.ReplyMarkup{}); err != nil {
 		NewLogger("QUALITY").Warning("Не удалось убрать кнопки выбора качества: %v", err)
 	}
 	isAdmin := b.config.AdminID != "" && b.config.AdminID == toStr(c.Sender().ID)

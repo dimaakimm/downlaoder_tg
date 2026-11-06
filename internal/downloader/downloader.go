@@ -145,25 +145,21 @@ func DownloadYouTubeVideoWithUserID(url string, userID int64, requestID string) 
 
 // DownloadYouTubeVideoWithUserIDProgress сообщает процент загрузки из yt-dlp.
 func DownloadYouTubeVideoWithUserIDProgress(url string, userID int64, requestID string, onProgress func(int)) (string, error) {
-	return DownloadYouTubeVideoWithUserIDQualityProgress(url, userID, requestID, 0, onProgress)
+	return DownloadYouTubeVideoWithUserIDQualityProgress(url, userID, requestID, 0, onProgress, nil)
 }
 
-func qualityFormat(quality int) (string, error) {
-	if quality != 1080 && quality != 720 && quality != 480 {
-		return "", fmt.Errorf("неподдерживаемое качество: %d", quality)
+// DownloadYouTubeVideoWithUserIDQualityProgress selects a native resolution or downscales it.
+func DownloadYouTubeVideoWithUserIDQualityProgress(url string, userID int64, requestID string, quality int, onProgress func(int), onConversion func()) (string, error) {
+	var plan qualityPlan
+	if quality < 0 {
+		return "", ErrQualityUnavailable
 	}
-	height := fmt.Sprintf("[height<=%d]", quality)
-	return "bestvideo" + height + "[ext=mp4]+bestaudio[ext=m4a]/" +
-		"best" + height + "[ext=mp4]/" +
-		"bestvideo" + height + "+bestaudio/" + "best" + height, nil
-}
-
-// DownloadYouTubeVideoWithUserIDQualityProgress limits the video stream height.
-func DownloadYouTubeVideoWithUserIDQualityProgress(url string, userID int64, requestID string, quality int, onProgress func(int)) (string, error) {
-	var format string
 	if quality != 0 {
-		var err error
-		format, err = qualityFormat(quality)
+		metadata, err := probeVideo(url)
+		if err != nil {
+			return "", err
+		}
+		plan, err = planQuality(metadata, quality, ffmpegAvailable())
 		if err != nil {
 			return "", err
 		}
@@ -215,7 +211,7 @@ func DownloadYouTubeVideoWithUserIDQualityProgress(url string, userID int64, req
 		strategies = []struct {
 			name string
 			args []string
-		}{{name: "selected_quality", args: []string{"-f", format, "--merge-output-format", "mp4", "-o", absFilename, "--no-mtime", "--no-warnings", "--newline"}}}
+		}{{name: "selected_quality", args: []string{"-f", plan.selector, "--merge-output-format", "mp4", "-o", absFilename, "--no-mtime", "--no-warnings", "--newline"}}}
 	}
 
 	var lastError error
@@ -223,7 +219,7 @@ func DownloadYouTubeVideoWithUserIDQualityProgress(url string, userID int64, req
 		fmt.Printf("[DOWNLOADER] [%s] Пользователь %d: пробуем стратегию %d: %s\n", requestID, userID, i+1, strategy.name)
 
 		cmd := exec.Command(absYtDlpPath, strategy.args...)
-		cmd.Args = append(cmd.Args, url)
+		cmd.Args = append(cmd.Args, "--ignore-config", "--no-playlist", "--", url)
 
 		progress := &progressOutput{onUpdate: onProgress}
 		cmd.Stdout = progress
@@ -239,6 +235,12 @@ func DownloadYouTubeVideoWithUserIDQualityProgress(url string, userID int64, req
 		// Проверяем, создался ли файл
 		if _, err := os.Stat(absFilename); err == nil {
 			fmt.Printf("[DOWNLOADER] [%s] Пользователь %d: успешно скачано с помощью стратегии: %s\n", requestID, userID, strategy.name)
+			if plan.convert {
+				if onConversion != nil {
+					onConversion()
+				}
+				return convertVideo(absFilename, quality)
+			}
 			return absFilename, nil
 		}
 
@@ -250,6 +252,12 @@ func DownloadYouTubeVideoWithUserIDQualityProgress(url string, userID int64, req
 			altFilename := baseName + ext
 			if _, err := os.Stat(altFilename); err == nil {
 				fmt.Printf("[DOWNLOADER] [%s] Пользователь %d: найден файл с расширением %s: %s\n", requestID, userID, ext, altFilename)
+				if plan.convert {
+					if onConversion != nil {
+						onConversion()
+					}
+					return convertVideo(altFilename, quality)
+				}
 				return altFilename, nil
 			}
 		}

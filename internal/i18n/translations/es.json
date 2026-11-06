@@ -1,4 +1,13 @@
 {
+  "download_converting": "Convirtiendo el vídeo a %dp… Puede tardar un poco.",
+  "quality_checking": "Comprobando la calidad disponible…",
+  "quality_prompt": "Elige la calidad. Las opciones «convertido» se crean a partir del original y requieren más tiempo. La resolución corresponde al lado más corto.",
+  "quality_original": "Original (mejor)",
+  "quality_convert": "%dp · convertido",
+  "quality_selected": "Selección: %s",
+  "quality_probe_error": "No se pudieron obtener los formatos. Comprueba que el vídeo sea público y vuelve a enviar el enlace más tarde.",
+  "quality_unavailable": "Esta calidad ya no está disponible. Vuelve a enviar el enlace para actualizar las opciones o elige el original.",
+  "download_failed": "No se pudo descargar el vídeo. Comprueba que esté disponible e inténtalo más tarde.",
   "welcome": "👋 ¡Bienvenido!\n\nEste bot te permite descargar videos de varios sitios. ¡Solo envía un enlace de video!",
   "downloads_are_free": "Las descargas ahora son gratis. Envía el enlace del video de nuevo.",
   "no_url_found": "No se encontró enlace. Por favor, envía un enlace de video.",

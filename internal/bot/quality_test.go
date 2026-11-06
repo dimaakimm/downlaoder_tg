@@ -4,7 +4,7 @@ import "testing"
 
 func TestVideoQualityPayloadAndCache(t *testing.T) {
 	url := "https://example.com/watch?v=abc"
-	for _, quality := range []int{1080, 720, 480} {
+	for _, quality := range []int{0, 2160, 1080, 720, 480, 360} {
 		gotQuality, gotURL := parseVideoPayload(videoPayload(url, quality)[len("video|"):])
 		if gotQuality != quality || gotURL != url {
 			t.Fatalf("round trip: got (%d, %q), want (%d, %q)", gotQuality, gotURL, quality, url)

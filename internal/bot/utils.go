@@ -141,11 +141,11 @@ func DownloadVideoWithProgress(url string, onProgress func(int)) (string, error)
 	return downloader.DownloadYouTubeVideoWithUserIDProgress(url, 0, requestID, onProgress)
 }
 
-func DownloadVideoWithQualityProgress(url string, quality int, onProgress func(int)) (string, error) {
+func DownloadVideoWithQualityProgress(url string, quality int, onProgress func(int), onConversion func()) (string, error) {
 	// Создаем уникальный идентификатор для каждого скачивания
 	requestID := GenerateRequestID()
 
-	return downloader.DownloadYouTubeVideoWithUserIDQualityProgress(url, 0, requestID, quality, onProgress)
+	return downloader.DownloadYouTubeVideoWithUserIDQualityProgress(url, 0, requestID, quality, onProgress, onConversion)
 }
 
 // GetVideoInfo получает информацию о видео

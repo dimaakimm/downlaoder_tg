@@ -219,6 +219,16 @@ func (b *Bot) sendVideo(c tele.Context, url string, chargeID string, amount int,
 		logger.Warning("Не удалось отправить статус загрузки: %v", statusErr)
 	}
 	setStatus := func(key string, args ...interface{}) {
+		if key == "download_error" {
+			key = "download_failed"
+			if len(args) > 0 {
+				detail := strings.ToLower(fmt.Sprint(args[0]))
+				if strings.Contains(detail, "requested format is not available") || strings.Contains(detail, downloader.ErrQualityUnavailable.Error()) {
+					key = "quality_unavailable"
+				}
+			}
+			args = nil
+		}
 		message := b.i18nManager.T(c.Sender(), key, args...)
 		if status == nil {
 			var err error
@@ -357,6 +367,8 @@ func (b *Bot) sendVideo(c tele.Context, url string, chargeID string, amount int,
 		}
 		setStatus("download_progress", percent)
 		lastProgressUpdate = time.Now()
+	}, func() {
+		setStatus("download_converting", quality)
 	})
 	if err != nil {
 		logger.Error("Ошибка скачивания видео: %v", err)
