@@ -137,11 +137,15 @@ func DownloadVideo(url string) (string, error) {
 
 // DownloadVideoWithProgress передает прогресс текущей загрузки вызывающему коду.
 func DownloadVideoWithProgress(url string, onProgress func(int)) (string, error) {
+	requestID := GenerateRequestID()
+	return downloader.DownloadYouTubeVideoWithUserIDProgress(url, 0, requestID, onProgress)
+}
+
+func DownloadVideoWithQualityProgress(url string, quality int, onProgress func(int)) (string, error) {
 	// Создаем уникальный идентификатор для каждого скачивания
 	requestID := GenerateRequestID()
 
-	// Используем реальную функцию скачивания из пакета downloader с уникальным ID
-	return downloader.DownloadYouTubeVideoWithUserIDProgress(url, 0, requestID, onProgress)
+	return downloader.DownloadYouTubeVideoWithUserIDQualityProgress(url, 0, requestID, quality, onProgress)
 }
 
 // GetVideoInfo получает информацию о видео
@@ -310,16 +314,10 @@ func ClearCacheForURL(db interface{}, url string) error {
 	}
 
 	// Используем URL напрямую для очистки кэша
-	cacheKey := url
-	fmt.Printf("[CACHE] Очищаем кэш для URL: %s (ключ: %s)\n", url, cacheKey)
-
-	// Удаляем по хешу URL
-	err := storage.DeleteVideoFromCache(sqlDB, cacheKey)
-	if err != nil {
-		fmt.Printf("[CACHE] Ошибка удаления ключа: %v\n", err)
-	} else {
-		fmt.Printf("[CACHE] Удален ключ из кэша\n")
+	for _, key := range []string{url, videoCacheKey(url, 1080), videoCacheKey(url, 720), videoCacheKey(url, 480)} {
+		if err := storage.DeleteVideoFromCache(sqlDB, key); err != nil {
+			return err
+		}
 	}
-
 	return nil
 }

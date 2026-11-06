@@ -33,6 +33,8 @@ type Bot struct {
 	downloadManager    *DownloadManager
 	db                 *sql.DB
 	i18nManager        *i18n.Manager
+	qualityMutex       sync.Mutex
+	pendingQuality     map[string]qualityRequest
 }
 
 // DownloadManager управляет скачиваниями

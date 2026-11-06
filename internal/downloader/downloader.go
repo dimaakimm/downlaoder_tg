@@ -145,6 +145,29 @@ func DownloadYouTubeVideoWithUserID(url string, userID int64, requestID string) 
 
 // DownloadYouTubeVideoWithUserIDProgress сообщает процент загрузки из yt-dlp.
 func DownloadYouTubeVideoWithUserIDProgress(url string, userID int64, requestID string, onProgress func(int)) (string, error) {
+	return DownloadYouTubeVideoWithUserIDQualityProgress(url, userID, requestID, 0, onProgress)
+}
+
+func qualityFormat(quality int) (string, error) {
+	if quality != 1080 && quality != 720 && quality != 480 {
+		return "", fmt.Errorf("неподдерживаемое качество: %d", quality)
+	}
+	height := fmt.Sprintf("[height<=%d]", quality)
+	return "bestvideo" + height + "[ext=mp4]+bestaudio[ext=m4a]/" +
+		"best" + height + "[ext=mp4]/" +
+		"bestvideo" + height + "+bestaudio/" + "best" + height, nil
+}
+
+// DownloadYouTubeVideoWithUserIDQualityProgress limits the video stream height.
+func DownloadYouTubeVideoWithUserIDQualityProgress(url string, userID int64, requestID string, quality int, onProgress func(int)) (string, error) {
+	var format string
+	if quality != 0 {
+		var err error
+		format, err = qualityFormat(quality)
+		if err != nil {
+			return "", err
+		}
+	}
 	tmpDir := "./tmp"
 	if err := os.MkdirAll(tmpDir, 0755); err != nil {
 		return "", errors.New("не удалось создать временную папку: " + err.Error())
@@ -187,6 +210,12 @@ func DownloadYouTubeVideoWithUserIDProgress(url string, userID int64, requestID 
 			name: "worst_quality",
 			args: []string{"-f", "worst[ext=mp4]/worst", "-o", absFilename, "--no-mtime", "--no-warnings", "--newline"},
 		},
+	}
+	if quality != 0 {
+		strategies = []struct {
+			name string
+			args []string
+		}{{name: "selected_quality", args: []string{"-f", format, "--merge-output-format", "mp4", "-o", absFilename, "--no-mtime", "--no-warnings", "--newline"}}}
 	}
 
 	var lastError error

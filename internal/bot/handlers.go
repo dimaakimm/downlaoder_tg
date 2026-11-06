@@ -152,13 +152,18 @@ func (b *Bot) handleURLMessage(c tele.Context, msg *tele.Message, isAdmin bool) 
 	}
 
 	logger.Info("Обрабатываем URL: %s для пользователя %d (админ: %t)", url, msg.Sender.ID, isAdmin)
+	return b.askVideoQuality(msg, url)
+}
+
+func (b *Bot) handleSelectedURL(c tele.Context, msg *tele.Message, url string, isAdmin bool, quality int) error {
+	logger := NewLogger("URL_HANDLER")
 
 	// Определяем тип чата и настраиваем ответ
 	chatType := msg.Chat.Type
 	var replyToMsg *tele.Message
 	if chatType == "channel" {
 		// В канале удаляем исходное сообщение
-		c.Delete()
+		_ = b.api.Delete(msg)
 		replyToMsg = nil
 	} else if chatType == "group" || chatType == "supergroup" {
 		// В группе отвечаем на сообщение
@@ -170,13 +175,13 @@ func (b *Bot) handleURLMessage(c tele.Context, msg *tele.Message, isAdmin bool) 
 
 	if isAdmin {
 		logger.Info("Пользователь %d является админом — скачивание бесплатно", msg.Sender.ID)
-		go b.sendVideo(c, url, "", 0, replyToMsg)
+		go b.sendVideo(c, url, "", 0, replyToMsg, quality)
 		return nil
 	}
 
 	if !b.config.PaymentEnabled {
 		logger.Info("Бесплатный режим — скачивание для пользователя %d", msg.Sender.ID)
-		go b.sendVideo(c, url, "", 0, replyToMsg)
+		go b.sendVideo(c, url, "", 0, replyToMsg, quality)
 		return nil
 	}
 
@@ -185,7 +190,7 @@ func (b *Bot) handleURLMessage(c tele.Context, msg *tele.Message, isAdmin bool) 
 
 	if b.config.ChannelUsername == "" {
 		logger.Warning("ChannelUsername не задан в конфиге! Подписка не может быть проверена, предлагаем оплату.")
-		return b.sendPaymentKeyboardWithSubscriptions(c, url)
+		return b.sendPaymentKeyboardWithSubscriptions(c, url, quality)
 	}
 
 	logger.Info("Проверяем подписку пользователя %d на канал %s", msg.Sender.ID, b.config.ChannelUsername)
@@ -193,17 +198,17 @@ func (b *Bot) handleURLMessage(c tele.Context, msg *tele.Message, isAdmin bool) 
 	if err != nil {
 		logger.Warning("Ошибка проверки подписки пользователя %d на канал %s: %v", msg.Sender.ID, b.config.ChannelUsername, err)
 		logger.Info("Из-за ошибки проверки подписки предлагаем оплату")
-		return b.sendPaymentKeyboardWithSubscriptions(c, url)
+		return b.sendPaymentKeyboardWithSubscriptions(c, url, quality)
 	}
 
 	if isSub {
 		logger.Info("Пользователь %d подписан на канал %s — скачивание бесплатно", msg.Sender.ID, b.config.ChannelUsername)
-		go b.sendVideo(c, url, "", 0, replyToMsg)
+		go b.sendVideo(c, url, "", 0, replyToMsg, quality)
 		return nil
 	}
 
 	logger.Info("Пользователь %d НЕ подписан на канал %s — предлагаем оплату", msg.Sender.ID, b.config.ChannelUsername)
-	return b.sendPaymentKeyboardWithSubscriptions(c, url)
+	return b.sendPaymentKeyboardWithSubscriptions(c, url, quality)
 }
 
 // handleCacheCleanCommand обрабатывает команду очистки кэша
@@ -277,7 +282,7 @@ func (b *Bot) handleForceDownloadCommand(c tele.Context, text string) error {
 	}
 
 	// Запускаем принудительное скачивание
-	go b.sendVideo(c, url, "", 0, nil)
+	go b.sendVideo(c, url, "", 0, nil, 1080)
 
 	return c.Send(fmt.Sprintf("🔄 Принудительное скачивание запущено для URL: %s", url))
 }
@@ -290,6 +295,9 @@ func (b *Bot) handleCallback(c tele.Context) error {
 	logger.Info("user_id=%d, data=%q", cb.Sender.ID, cb.Data)
 
 	data := cb.Data
+	if strings.HasPrefix(data, "quality|") {
+		return b.handleQualityCallback(c, data)
+	}
 
 	// Старые кнопки оплаты не должны создавать счета в бесплатном режиме.
 	if !b.config.PaymentEnabled && (strings.HasPrefix(data, CallbackPayVideo+"|") ||
@@ -342,6 +350,9 @@ func (b *Bot) handleVideoPaymentCallback(c tele.Context, data string) error {
 	trx, err := payment.GetTransactionByID(b.db, id)
 	if err != nil {
 		return c.Send(b.i18nManager.T(c.Sender(), "transaction_not_found"))
+	}
+	if trx.TelegramUserID != c.Sender().ID {
+		return c.Respond(&tele.CallbackResponse{Text: "Этот платёж предназначен другому пользователю"})
 	}
 
 	return b.sendVideoInvoiceByDB(c, trx)
@@ -428,7 +439,8 @@ func (b *Bot) processPayment(c tele.Context, paymentInfo *tele.Payment) error {
 // handleVideoPayment обрабатывает платеж за видео
 func (b *Bot) handleVideoPayment(c tele.Context, payload, chargeID string, amount int) error {
 	url := strings.TrimPrefix(payload, "video|")
-	go b.sendVideo(c, url, chargeID, amount, nil)
+	quality, url := parseVideoPayload(url)
+	go b.sendVideo(c, url, chargeID, amount, nil, quality)
 	return c.Send(b.i18nManager.T(c.Sender(), "payment_accepted"))
 }
 

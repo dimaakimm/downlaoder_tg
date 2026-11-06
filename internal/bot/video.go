@@ -54,12 +54,12 @@ func (b *Bot) sendUniversalPayKeyboard(c tele.Context, url string) error {
 }
 
 // sendPaymentKeyboardWithSubscriptions отправляет платежную клавиатуру с опциями подписки
-func (b *Bot) sendPaymentKeyboardWithSubscriptions(c tele.Context, url string) error {
+func (b *Bot) sendPaymentKeyboardWithSubscriptions(c tele.Context, url string, quality int) error {
 	logger := NewLogger("PAYMENT")
 
 	// Создаем транзакцию для видео
 	trx := &payment.Transaction{
-		InvoicePayload:          "video|" + url,
+		InvoicePayload:          videoPayload(url, quality),
 		Amount:                  1, // 1 XTR
 		TelegramUserID:          c.Sender().ID,
 		Status:                  "pending",
@@ -204,7 +204,7 @@ func (b *Bot) sendVideoWithRetry(c tele.Context, video *tele.Video, url string, 
 
 // sendVideo обрабатывает скачивание и отправку видео
 // replyToMsg - если не nil, видео будет отправлено как ответ на это сообщение
-func (b *Bot) sendVideo(c tele.Context, url string, chargeID string, amount int, replyToMsg *tele.Message) {
+func (b *Bot) sendVideo(c tele.Context, url string, chargeID string, amount int, replyToMsg *tele.Message, quality int) {
 	logger := NewLogger("VIDEO")
 	startTime := time.Now()
 	var status *tele.Message
@@ -241,10 +241,11 @@ func (b *Bot) sendVideo(c tele.Context, url string, chargeID string, amount int,
 	logger.Info("Начинаем скачивание видео: %s", url)
 
 	// Проверяем, не скачивается ли уже это видео
-	if b.downloadManager.IsDownloadActive(url) {
+	cacheKey := videoCacheKey(url, quality)
+	if b.downloadManager.IsDownloadActive(cacheKey) {
 		logger.Info("Видео уже скачивается, ожидаем завершения")
 		setStatus("download_in_progress")
-		downloadInfo, err := b.downloadManager.WaitForDownload(url, b.config.DownloadTimeout)
+		downloadInfo, err := b.downloadManager.WaitForDownload(cacheKey, b.config.DownloadTimeout)
 		if err != nil {
 			logger.Error("Ошибка ожидания скачивания: %v", err)
 			setStatus("download_wait_error")
@@ -266,20 +267,17 @@ func (b *Bot) sendVideo(c tele.Context, url string, chargeID string, amount int,
 	defer b.downloadManager.ReleaseDownloadSlot()
 
 	// Получаем мьютекс для URL
-	mutex := b.downloadManager.GetURLMutex(url)
+	mutex := b.downloadManager.GetURLMutex(cacheKey)
 	mutex.Lock()
 	defer func() {
 		mutex.Unlock()
-		b.downloadManager.CleanupURLMutex(url)
+		b.downloadManager.CleanupURLMutex(cacheKey)
 	}()
 
 	// Регистрируем начало скачивания
 	requestID := GenerateRequestID()
-	_ = b.downloadManager.StartDownload(url, requestID, c.Sender().ID)
-	defer b.downloadManager.FinishDownload(url, nil)
-
-	// Создать уникальный ключ кэша на основе URL
-	cacheKey := url
+	_ = b.downloadManager.StartDownload(cacheKey, requestID, c.Sender().ID)
+	defer b.downloadManager.FinishDownload(cacheKey, nil)
 
 	// Проверяем кэш для конкретного URL
 	logger.Info("Проверяем кэш для URL: %s (ключ: %s)", url, cacheKey)
@@ -353,7 +351,7 @@ func (b *Bot) sendVideo(c tele.Context, url string, chargeID string, amount int,
 
 	// Создаем уникальный путь для каждого скачивания
 	lastProgressUpdate := time.Time{}
-	uniqueVideoPath, err := DownloadVideoWithProgress(url, func(percent int) {
+	uniqueVideoPath, err := DownloadVideoWithQualityProgress(url, quality, func(percent int) {
 		if time.Since(lastProgressUpdate) < 2*time.Second {
 			return
 		}
@@ -362,7 +360,7 @@ func (b *Bot) sendVideo(c tele.Context, url string, chargeID string, amount int,
 	})
 	if err != nil {
 		logger.Error("Ошибка скачивания видео: %v", err)
-		b.downloadManager.FinishDownload(url, err)
+		b.downloadManager.FinishDownload(cacheKey, err)
 		setStatus("download_error", err.Error())
 		return
 	}
@@ -370,7 +368,7 @@ func (b *Bot) sendVideo(c tele.Context, url string, chargeID string, amount int,
 	// Проверяем, что файл действительно существует и уникален
 	if uniqueVideoPath == "" {
 		logger.Error("Получен пустой путь к видео")
-		b.downloadManager.FinishDownload(url, fmt.Errorf("пустой путь к видео"))
+		b.downloadManager.FinishDownload(cacheKey, fmt.Errorf("пустой путь к видео"))
 		setStatus("download_error", "пустой путь к видео")
 		return
 	}
@@ -378,7 +376,7 @@ func (b *Bot) sendVideo(c tele.Context, url string, chargeID string, amount int,
 	// Проверяем, что файл существует
 	if _, err := os.Stat(uniqueVideoPath); os.IsNotExist(err) {
 		logger.Error("Файл не существует по пути: %s", uniqueVideoPath)
-		b.downloadManager.FinishDownload(url, fmt.Errorf("файл не существует"))
+		b.downloadManager.FinishDownload(cacheKey, fmt.Errorf("файл не существует"))
 		setStatus("download_error", "файл не существует")
 		return
 	}
@@ -389,7 +387,7 @@ func (b *Bot) sendVideo(c tele.Context, url string, chargeID string, amount int,
 	videoInfo, err := GetVideoInfo(uniqueVideoPath)
 	if err != nil {
 		logger.Error("Ошибка получения информации о видео: %v", err)
-		b.downloadManager.FinishDownload(url, err)
+		b.downloadManager.FinishDownload(cacheKey, err)
 		setStatus("download_error", err.Error())
 		return
 	}
@@ -423,7 +421,7 @@ func (b *Bot) sendVideo(c tele.Context, url string, chargeID string, amount int,
 		}
 		if err != nil {
 			logger.Error("Ошибка отправки видео: %v", err)
-			b.downloadManager.FinishDownload(url, err)
+			b.downloadManager.FinishDownload(cacheKey, err)
 			setStatus("send_error", err)
 			return
 		}
