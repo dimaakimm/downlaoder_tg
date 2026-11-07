@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -73,13 +72,7 @@ func DownloadYouTubeVideo(url string) (string, error) {
 	filename := filepath.Join(tmpDir, "ytvideo_"+utils.RandomString(8)+".mp4")
 	absFilename, _ := filepath.Abs(filename)
 
-	var ytDlpPath string
-	if runtime.GOOS == "windows" {
-		ytDlpPath = "./yt-dlp.exe"
-	} else {
-		ytDlpPath = "./yt-dlp_linux"
-	}
-	absYtDlpPath, _ := filepath.Abs(ytDlpPath)
+	absYtDlpPath := ytdlpPath()
 
 	// Пробуем разные стратегии скачивания
 	strategies := []struct {
@@ -104,8 +97,7 @@ func DownloadYouTubeVideo(url string) (string, error) {
 	for i, strategy := range strategies {
 		fmt.Printf("[DOWNLOADER] Пробуем стратегию %d: %s\n", i+1, strategy.name)
 
-		cmd := exec.Command(absYtDlpPath, strategy.args...)
-		cmd.Args = append(cmd.Args, url)
+		cmd := exec.Command(absYtDlpPath, ytdlpArgs(url, strategy.args, "")...)
 
 		output, err := cmd.CombinedOutput()
 		if err != nil {
@@ -181,13 +173,7 @@ func DownloadYouTubeVideoWithUserIDQualityProgress(url string, userID int64, req
 	filename := filepath.Join(tmpDir, fmt.Sprintf("ytvideo_user%d_%s.mp4", userID, requestID))
 	absFilename, _ := filepath.Abs(filename)
 
-	var ytDlpPath string
-	if runtime.GOOS == "windows" {
-		ytDlpPath = "./yt-dlp.exe"
-	} else {
-		ytDlpPath = "./yt-dlp_linux"
-	}
-	absYtDlpPath, _ := filepath.Abs(ytDlpPath)
+	absYtDlpPath := ytdlpPath()
 
 	// Пробуем разные стратегии скачивания
 	strategies := []struct {
@@ -207,6 +193,14 @@ func DownloadYouTubeVideoWithUserIDQualityProgress(url string, userID int64, req
 			args: []string{"-f", "worst[ext=mp4]/worst", "-o", absFilename, "--no-mtime", "--no-warnings", "--newline"},
 		},
 	}
+	if quality == 0 && isYouTubeURL(url) {
+		// Changing the format cannot fix a failed YouTube extraction; switch client.
+		strategies = strategies[:1]
+		strategies = append(strategies, struct {
+			name string
+			args []string
+		}{name: "youtube_android_vr", args: []string{"--extractor-args", "youtube:player_client=android_vr", "-f", "bestvideo+bestaudio/best", "--merge-output-format", "mp4", "-o", absFilename, "--no-mtime", "--newline"}})
+	}
 	if quality != 0 {
 		strategies = []struct {
 			name string
@@ -218,8 +212,7 @@ func DownloadYouTubeVideoWithUserIDQualityProgress(url string, userID int64, req
 	for i, strategy := range strategies {
 		fmt.Printf("[DOWNLOADER] [%s] Пользователь %d: пробуем стратегию %d: %s\n", requestID, userID, i+1, strategy.name)
 
-		cmd := exec.Command(absYtDlpPath, strategy.args...)
-		cmd.Args = append(cmd.Args, "--ignore-config", "--no-playlist", "--", url)
+		cmd := exec.Command(absYtDlpPath, ytdlpArgs(url, strategy.args, plan.playerClient)...)
 
 		progress := &progressOutput{onUpdate: onProgress}
 		cmd.Stdout = progress
@@ -287,13 +280,7 @@ func DownloadYouTubeVideoWithUserIDAndURL(url string, userID int64, requestID st
 	filename := filepath.Join(tmpDir, fmt.Sprintf("ytvideo_user%d_%s_%s.mp4", userID, requestID, urlHash))
 	absFilename, _ := filepath.Abs(filename)
 
-	var ytDlpPath string
-	if runtime.GOOS == "windows" {
-		ytDlpPath = "./yt-dlp.exe"
-	} else {
-		ytDlpPath = "./yt-dlp_linux"
-	}
-	absYtDlpPath, _ := filepath.Abs(ytDlpPath)
+	absYtDlpPath := ytdlpPath()
 
 	// Пробуем разные стратегии скачивания
 	strategies := []struct {
@@ -318,8 +305,7 @@ func DownloadYouTubeVideoWithUserIDAndURL(url string, userID int64, requestID st
 	for i, strategy := range strategies {
 		fmt.Printf("[DOWNLOADER] [%s] Пользователь %d (URL: %s): пробуем стратегию %d: %s\n", requestID, userID, urlHash, i+1, strategy.name)
 
-		cmd := exec.Command(absYtDlpPath, strategy.args...)
-		cmd.Args = append(cmd.Args, url)
+		cmd := exec.Command(absYtDlpPath, ytdlpArgs(url, strategy.args, "")...)
 
 		output, err := cmd.CombinedOutput()
 		if err != nil {

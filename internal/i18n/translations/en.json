@@ -1,4 +1,7 @@
 {
+  "quality_probe_fallback": "Could not determine video resolutions. You can try downloading the original with automatic quality selection.",
+  "youtube_access_limited": "YouTube has limited access from the bot server. Try again later; if this persists, the administrator needs to check the YouTube connection.",
+  "video_unavailable": "This video is unavailable, private, removed, or access restricted.",
   "download_converting": "Converting video to %dp... This may take a little time.",
   "quality_checking": "Checking available video quality...",
   "quality_prompt": "Choose video quality. Options marked converted are created from the source and take extra time. Resolution refers to the shorter side.",

@@ -222,6 +222,7 @@ func (b *Bot) sendVideo(c tele.Context, url string, chargeID string, amount int,
 		if key == "download_error" {
 			key = "download_failed"
 			if len(args) > 0 {
+				key = downloader.ErrorMessageKey(fmt.Errorf("%v", args[0]))
 				detail := strings.ToLower(fmt.Sprint(args[0]))
 				if strings.Contains(detail, "requested format is not available") || strings.Contains(detail, downloader.ErrQualityUnavailable.Error()) {
 					key = "quality_unavailable"

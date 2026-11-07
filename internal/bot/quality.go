@@ -61,10 +61,16 @@ func (b *Bot) askVideoQuality(msg *tele.Message, url string) error {
 		NewLogger("QUALITY").Warning("yt-dlp update: %v", err)
 	}
 	qualities, err := downloader.AvailableVideoQualities(url)
+	prompt := "quality_prompt"
 	if err != nil {
 		NewLogger("QUALITY").Error("Cannot list formats for %s: %v", url, err)
-		_, sendErr := b.api.Edit(status, b.i18nManager.T(msg.Sender, "quality_probe_error"))
-		return sendErr
+		if key := downloader.ErrorMessageKey(err); key != "download_failed" {
+			_, sendErr := b.api.Edit(status, b.i18nManager.T(msg.Sender, key))
+			return sendErr
+		}
+		// A metadata failure must not prevent trying the original download path.
+		qualities = []downloader.QualityOption{{Resolution: 0}}
+		prompt = "quality_probe_fallback"
 	}
 	token := GenerateRequestID()
 	request := qualityRequest{url: url, message: msg, userID: msg.Sender.ID, chatID: msg.Chat.ID, createdAt: time.Now(), options: make(map[int]string)}
@@ -95,7 +101,7 @@ func (b *Bot) askVideoQuality(msg *tele.Message, url string) error {
 	b.pendingQuality[token] = request
 	b.qualityMutex.Unlock()
 
-	if _, err := b.api.Edit(status, b.i18nManager.T(msg.Sender, "quality_prompt"), markup); err != nil {
+	if _, err := b.api.Edit(status, b.i18nManager.T(msg.Sender, prompt), markup); err != nil {
 		b.qualityMutex.Lock()
 		delete(b.pendingQuality, token)
 		b.qualityMutex.Unlock()

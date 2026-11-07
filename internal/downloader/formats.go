@@ -28,7 +28,8 @@ type videoFormat struct {
 }
 
 type videoMetadata struct {
-	Formats []videoFormat `json:"formats"`
+	Formats      []videoFormat `json:"formats"`
+	playerClient string
 }
 
 type QualityOption struct {
@@ -37,6 +38,10 @@ type QualityOption struct {
 }
 
 func ytdlpPath() string {
+	if configured := os.Getenv("YTDLP_PATH"); configured != "" {
+		path, _ := filepath.Abs(configured)
+		return path
+	}
 	name := "./yt-dlp_linux"
 	if runtime.GOOS == "windows" {
 		name = "./yt-dlp.exe"
@@ -51,19 +56,31 @@ func ffmpegAvailable() bool {
 }
 
 func probeVideo(url string) (videoMetadata, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, ytdlpPath(), "--ignore-config", "--no-playlist", "--skip-download", "--dump-single-json", "--no-warnings", "--socket-timeout", "15", "--", url)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	if err := cmd.Run(); err != nil {
-		return videoMetadata{}, fmt.Errorf("probe video: %w: %s", err, stderr.String())
+	clients := []string{""}
+	if isYouTubeURL(url) {
+		clients = append(clients, "android_vr")
 	}
-	var metadata videoMetadata
-	if err := json.Unmarshal(stdout.Bytes(), &metadata); err != nil {
-		return metadata, fmt.Errorf("decode video formats: %w", err)
+	var failures []error
+	for _, client := range clients {
+		cmd := exec.CommandContext(ctx, ytdlpPath(), ytdlpArgs(url, []string{"--skip-download", "--dump-single-json", "--ignore-no-formats-error"}, client)...)
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout, cmd.Stderr = &stdout, &stderr
+		err := cmd.Run()
+		var metadata videoMetadata
+		decodeErr := json.Unmarshal(stdout.Bytes(), &metadata)
+		// Metadata can be usable even when yt-dlp cannot select its default format.
+		if decodeErr == nil && len(metadata.videoFormats(ffmpegAvailable())) > 0 {
+			metadata.playerClient = client
+			return metadata, nil
+		}
+		failures = append(failures, fmt.Errorf("probe video (client %q): process=%v, JSON=%v: %s", client, err, decodeErr, stderr.String()))
+		if ctx.Err() != nil || ErrorMessageKey(failures[len(failures)-1]) == "video_unavailable" {
+			break
+		}
 	}
-	return metadata, nil
+	return videoMetadata{}, errors.Join(failures...)
 }
 
 func (f videoFormat) resolution() int {
@@ -137,8 +154,9 @@ func AvailableVideoQualities(url string) ([]QualityOption, error) {
 }
 
 type qualityPlan struct {
-	selector string
-	convert  bool
+	selector     string
+	convert      bool
+	playerClient string
 }
 
 func planQuality(metadata videoMetadata, quality int, canConvert bool) (qualityPlan, error) {
@@ -166,7 +184,7 @@ func planQuality(metadata videoMetadata, quality int, canConvert bool) (qualityP
 	if selected.ACodec == "none" && metadata.hasSeparateAudio() {
 		selector += "+bestaudio"
 	}
-	return qualityPlan{selector: selector, convert: convert}, nil
+	return qualityPlan{selector: selector, convert: convert, playerClient: metadata.playerClient}, nil
 }
 
 // Scale the short side, preserving orientation and aspect ratio. Never upscale.

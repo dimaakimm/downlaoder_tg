@@ -1,4 +1,7 @@
 {
+  "quality_probe_fallback": "Impossible de déterminer les résolutions. Vous pouvez essayer de télécharger l’original avec sélection automatique de la qualité.",
+  "youtube_access_limited": "YouTube a limité l’accès depuis le serveur du bot. Réessayez plus tard ; si le problème persiste, l’administrateur doit vérifier la connexion à YouTube.",
+  "video_unavailable": "Cette vidéo est indisponible, privée, supprimée ou soumise à des restrictions d’accès.",
   "download_converting": "Conversion de la vidéo en %dp… Cela peut prendre un peu de temps.",
   "quality_checking": "Vérification des qualités disponibles…",
   "quality_prompt": "Choisissez la qualité. Les options «converti» sont créées à partir de la source et prennent plus de temps. La résolution désigne le côté le plus court.",

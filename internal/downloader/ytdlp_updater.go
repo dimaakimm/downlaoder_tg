@@ -1,15 +1,32 @@
 package downloader
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"runtime"
+	"strings"
+	"sync"
 	"time"
 )
+
+var ytdlpUpdateMutex sync.Mutex
+
+func installedYTDLPVersion() (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	output, err := exec.CommandContext(ctx, ytdlpPath(), "--ignore-config", "--version").Output()
+	return strings.TrimPrefix(strings.TrimSpace(string(output)), "v"), err
+}
+
+func sameYTDLPVersion(recorded, installed string) bool {
+	return installed != "" && strings.TrimPrefix(recorded, "v") == strings.TrimPrefix(installed, "v")
+}
 
 // GitHubRelease represents a GitHub release
 type GitHubRelease struct {
@@ -41,20 +58,15 @@ const (
 
 // CheckAndUpdateYTDLp проверяет наличие новой версии yt-dlp и обновляет её при необходимости
 func CheckAndUpdateYTDLp(db *sql.DB) error {
+	ytdlpUpdateMutex.Lock()
+	defer ytdlpUpdateMutex.Unlock()
+	if db == nil {
+		return fmt.Errorf("yt-dlp update: database is unavailable")
+	}
 	// Проверяем, нужно ли обновлять (прошла ли 24 часа с последней проверки)
 	shouldCheck, err := shouldCheckForUpdate(db)
 	if err != nil {
 		return fmt.Errorf("ошибка проверки необходимости обновления: %w", err)
-	}
-
-	if !shouldCheck {
-		return nil // Обновление не требуется
-	}
-
-	// Получаем информацию о последней версии с GitHub
-	latestRelease, err := getLatestReleaseInfo()
-	if err != nil {
-		return fmt.Errorf("ошибка получения информации о последней версии: %w", err)
 	}
 
 	// Проверяем, есть ли запись в БД
@@ -62,9 +74,18 @@ func CheckAndUpdateYTDLp(db *sql.DB) error {
 	if err != nil {
 		return fmt.Errorf("ошибка получения текущей версии из БД: %w", err)
 	}
+	installed, installedErr := installedYTDLPVersion()
+	// Rebuilding a container can restore an older binary while the DB stays current.
+	if !shouldCheck && installedErr == nil && currentVersion != nil && sameYTDLPVersion(currentVersion.Version, installed) {
+		return nil
+	}
+	latestRelease, err := getLatestReleaseInfo()
+	if err != nil {
+		return fmt.Errorf("ошибка получения информации о последней версии: %w", err)
+	}
 
 	// Если версия отличается или отсутствует, скачиваем новую
-	if currentVersion == nil || currentVersion.Version != latestRelease.TagName {
+	if installedErr != nil || !sameYTDLPVersion(latestRelease.TagName, installed) {
 		if err := downloadAndUpdateYTDLp(latestRelease); err != nil {
 			return fmt.Errorf("ошибка обновления yt-dlp: %w", err)
 		}
@@ -77,11 +98,11 @@ func CheckAndUpdateYTDLp(db *sql.DB) error {
 		fmt.Printf("[YT-DLP UPDATER] yt-dlp успешно обновлен до версии %s\n", latestRelease.TagName)
 	} else {
 		// Обновляем время последней проверки
-		if err := updateLastChecked(db, currentVersion.Version); err != nil {
+		if err := updateVersionRecord(db, latestRelease.TagName); err != nil {
 			return fmt.Errorf("ошибка обновления времени последней проверки: %w", err)
 		}
 
-		fmt.Printf("[YT-DLP UPDATER] yt-dlp уже последней версии: %s\n", currentVersion.Version)
+		fmt.Printf("[YT-DLP UPDATER] yt-dlp уже последней версии: %s\n", installed)
 	}
 
 	return nil
@@ -89,6 +110,8 @@ func CheckAndUpdateYTDLp(db *sql.DB) error {
 
 // ForceUpdateYTDLp принудительно обновляет yt-dlp до последней версии, игнорируя проверки
 func ForceUpdateYTDLp(db *sql.DB) error {
+	ytdlpUpdateMutex.Lock()
+	defer ytdlpUpdateMutex.Unlock()
 	// Получаем информацию о последней версии с GitHub
 	latestRelease, err := getLatestReleaseInfo()
 	if err != nil {
@@ -188,11 +211,20 @@ func downloadAndUpdateYTDLp(release *GitHubRelease) error {
 		fileName = "yt-dlp_linux"
 		tempFileName = "yt-dlp_linux.tmp"
 	}
+	if configured := os.Getenv("YTDLP_PATH"); configured != "" {
+		fileName = configured
+		tempFileName = configured + ".tmp"
+	}
+	defer os.Remove(tempFileName)
 
 	// Ищем нужный ассет в релизе
 	var downloadURL string
 	for _, asset := range release.Assets {
-		if asset.Name == fileName {
+		assetName := "yt-dlp_linux"
+		if runtime.GOOS == "windows" {
+			assetName = "yt-dlp.exe"
+		}
+		if asset.Name == assetName {
 			downloadURL = asset.BrowserDownloadURL
 			break
 		}
