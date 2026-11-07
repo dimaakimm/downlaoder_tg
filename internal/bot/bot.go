@@ -73,6 +73,7 @@ func (b *Bot) Run() {
 
 	// Регистрируем основные обработчики
 	b.registerHandlers()
+	b.setupCommandMenu()
 
 	logger.Info("Запуск бота...")
 	b.api.Start()

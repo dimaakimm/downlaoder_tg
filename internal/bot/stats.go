@@ -5,6 +5,26 @@ import (
 	"time"
 )
 
+type UsageStats struct {
+	Users, Today, Week, Month int64
+	Downloads, Messages       int64
+}
+
+// Count distinct users from the source table instead of the legacy total_users counter.
+func GetUsageStats(db *sql.DB) (UsageStats, error) {
+	var stats UsageStats
+	err := db.QueryRow(`
+		SELECT COUNT(*),
+		       COUNT(*) FILTER (WHERE last_active >= CURRENT_DATE),
+		       COUNT(*) FILTER (WHERE last_active >= CURRENT_TIMESTAMP - INTERVAL '7 days'),
+		       COUNT(*) FILTER (WHERE last_active >= CURRENT_TIMESTAMP - INTERVAL '30 days'),
+		       COALESCE((SELECT total_downloads FROM total_stats WHERE id = 1), 0),
+		       COALESCE((SELECT total_messages FROM total_stats WHERE id = 1), 0)
+		FROM user_stats
+	`).Scan(&stats.Users, &stats.Today, &stats.Week, &stats.Month, &stats.Downloads, &stats.Messages)
+	return stats, err
+}
+
 // Обновить статистику пользователя (увеличить счетчик сообщений, обновить last_active)
 func UpdateUserStats(db *sql.DB, userID int64) error {
 	_, err := db.Exec(`
@@ -25,20 +45,6 @@ func UpdateWeeklyUserActivity(db *sql.DB, userID int64) error {
 		ON CONFLICT (user_id, activity_date) DO NOTHING
 	`, userID, time.Now().Format("2006-01-02"))
 	return err
-}
-
-// Увеличить общее количество пользователей, если пользователь новый
-func IncrementTotalUsersIfNew(db *sql.DB, userID int64) error {
-	var exists bool
-	err := db.QueryRow(`SELECT EXISTS(SELECT 1 FROM user_stats WHERE user_id = $1)`, userID).Scan(&exists)
-	if err != nil {
-		return err
-	}
-	if !exists {
-		_, err := db.Exec(`UPDATE total_stats SET total_users = total_users + 1, updated_at = $1 WHERE id = 1`, time.Now())
-		return err
-	}
-	return nil
 }
 
 // Увеличить счетчик сообщений в общей статистике

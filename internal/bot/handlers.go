@@ -21,7 +21,6 @@ func (b *Bot) handleMessage(c tele.Context) error {
 	userID := msg.Sender.ID
 	_ = UpdateUserStats(b.db, userID)
 	_ = UpdateWeeklyUserActivity(b.db, userID)
-	_ = IncrementTotalUsersIfNew(b.db, userID)
 	_ = IncrementTotalMessages(b.db)
 	// --- КОНЕЦ СТАТИСТИКИ ---
 
@@ -31,7 +30,7 @@ func (b *Bot) handleMessage(c tele.Context) error {
 		if isAdmin {
 			return c.Send(b.i18nManager.T(msg.Sender, "help_admin"))
 		} else {
-			return nil // обычному пользователю не отправлять ничего
+			return c.Send(b.i18nManager.T(msg.Sender, "help_user"))
 		}
 	}
 	// --- END /help ---
@@ -554,21 +553,20 @@ CHANNEL_USERNAME=ваш_канал_без_собачки
 
 // sendTotalStats отправляет админу общую статистику
 func (b *Bot) sendTotalStats(c tele.Context) error {
-	row := b.db.QueryRow(`SELECT total_users, total_downloads, total_messages, updated_at FROM total_stats WHERE id = 1`)
-	var users, downloads, messages int64
-	var updatedAt string
-	err := row.Scan(&users, &downloads, &messages, &updatedAt)
+	stats, err := GetUsageStats(b.db)
 	if err != nil {
 		if err == sql.ErrNoRows || err.Error() == "sql: no rows in result set" {
 			return c.Send(b.i18nManager.T(c.Sender(), "stats_no_data"))
 		}
 		return c.Send(b.i18nManager.T(c.Sender(), "stats_error", map[string]interface{}{"Error": err.Error()}))
 	}
-	msg := b.i18nManager.T(c.Sender(), "stats_total", map[string]interface{}{
-		"Users":     users,
-		"Downloads": downloads,
-		"Messages":  messages,
-		"UpdatedAt": updatedAt,
+	msg := b.i18nManager.T(c.Sender(), "stats_overview", map[string]interface{}{
+		"Users":     stats.Users,
+		"Today":     stats.Today,
+		"Week":      stats.Week,
+		"Month":     stats.Month,
+		"Downloads": stats.Downloads,
+		"Messages":  stats.Messages,
 	})
 	return c.Send(msg)
 }
@@ -606,7 +604,7 @@ func (b *Bot) sendUserStats(c tele.Context) error {
 
 // sendWeeklyStats отправляет админу количество уникальных пользователей за последние 7 дней
 func (b *Bot) sendWeeklyStats(c tele.Context) error {
-	row := b.db.QueryRow(`SELECT COUNT(DISTINCT user_id) FROM weekly_user_activity WHERE activity_date >= CURRENT_DATE - INTERVAL '7 days'`)
+	row := b.db.QueryRow(`SELECT COUNT(*) FROM user_stats WHERE last_active >= CURRENT_TIMESTAMP - INTERVAL '7 days'`)
 	var count int64
 	err := row.Scan(&count)
 	if err != nil {
