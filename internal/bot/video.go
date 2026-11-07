@@ -3,6 +3,7 @@ package bot
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -412,11 +413,7 @@ func (b *Bot) sendVideo(c tele.Context, url string, chargeID string, amount int,
 
 		logger.Info("Информация о скачанном видео: URL=%s, размер=%d байт, длительность=%s", url, fileSize, duration)
 
-		// Проверяем размер файла
-		if fileSize > 50*1024*1024 { // 50 МБ
-			logger.Warning("Видео слишком большое (%d байт), может не отправиться через Telegram API", fileSize)
-			c.Send(b.i18nManager.T(c.Sender(), "file_too_large"))
-		}
+		// Let the configured API enforce its own limit: local Bot API supports larger files.
 
 		video := &tele.Video{
 			File: tele.FromDisk(uniqueVideoPath),
@@ -435,6 +432,11 @@ func (b *Bot) sendVideo(c tele.Context, url string, chargeID string, amount int,
 		if err != nil {
 			logger.Error("Ошибка отправки видео: %v", err)
 			b.downloadManager.FinishDownload(cacheKey, err)
+			var apiErr *tele.Error
+			if errors.Is(err, tele.ErrTooLarge) || (errors.As(err, &apiErr) && apiErr.Code == 413) || strings.Contains(strings.ToLower(err.Error()), "file is too big") {
+				setStatus("video_size_limit")
+				return
+			}
 			setStatus("send_error", err)
 			return
 		}

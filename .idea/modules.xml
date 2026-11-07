@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/Telegram-YT-Downloader.iml" filepath="$PROJECT_DIR$/.idea/Telegram-YT-Downloader.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/downlaoder_tg.iml" filepath="$PROJECT_DIR$/.idea/downlaoder_tg.iml" />
     </modules>
   </component>
 </project>

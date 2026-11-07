@@ -1,4 +1,5 @@
 {
+  "video_size_limit": "❌ The video exceeds the upload size limit. Choose a lower quality or a shorter video.",
   "quality_probe_fallback": "Could not determine video resolutions. You can try downloading the original with automatic quality selection.",
   "youtube_access_limited": "YouTube has limited access from the bot server. Try again later; if this persists, the administrator needs to check the YouTube connection.",
   "video_unavailable": "This video is unavailable, private, removed, or access restricted.",
